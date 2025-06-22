@@ -3,7 +3,6 @@
 DELETE=0
 DRYRUN=0
 CLEANUP_ONLY=0
-COPY=0
 SRC_DIR=""
 DEST_DIR=""
 
@@ -18,9 +17,6 @@ print_help() {
   echo "  --dry-run          Show what would happen (no conversion or deletes)"
   echo "  --with-delete      Convert and delete .flac after successful conversion"
   echo "  --cleanup-only     Skip conversion, just delete .flac if .m4a is newer"
-  echo "  --and-copy-to-ipod-if-successful"
-  echo "                     After a completely successful conversion,"
-  echo "                     copy the output folder to any mounted USB devices"
   echo "  --help, -h         Show this help"
   echo ""
 }
@@ -48,7 +44,6 @@ for arg in "$@"; do
     --with-delete) DELETE=1 ;;
     --cleanup-only) CLEANUP_ONLY=1 ;;
     --dry-run) DRYRUN=1 ;;
-    --and-copy-to-ipod-if-successful) COPY=1 ;;
     --help|-h) print_help; exit 0 ;;
     *) echo "Unknown option: $arg" && print_help && exit 1 ;;
   esac
@@ -62,7 +57,6 @@ fi
 mkdir -p "$DEST_DIR"
 unconverted_files=()
 deleted_files=()
-FAIL=0
 
 find "$SRC_DIR" -type f -name '*.flac' -print0 | while IFS= read -r -d '' src_file; do
   rel_path="$(realpath --relative-to="$SRC_DIR" "$src_file")"
@@ -135,38 +129,10 @@ find "$SRC_DIR" -type f -name '*.flac' -print0 | while IFS= read -r -d '' src_fi
     fi
   else
     echo "❌ Conversion failed: $rel_path"
-    FAIL=1
     rm -f "$tmp_m4a" "$cover_file"
   fi
 
 done
-
-#— if requested and no failures, copy output to any removable USB device
-if [[ "$COPY" -eq 1 && "$CLEANUP_ONLY" -eq 0 && "$FAIL" -eq 0 ]]; then
-  echo ""
-  echo "⏩ Copying '$DEST_DIR' to removable USB devices..."
-  # detect removable mounts via lsblk
-  mapfile -t USBS < <(
-    lsblk -lp -o MOUNTPOINT,RM \
-    | awk '$2=="1" && $1!="" { print $1 }'
-  )
-  for dev in "${USBS[@]}"; do
-    # only devices with a Music folder at root
-    if [[ -d "$dev/Music" ]]; then
-      if [[ "$DRYRUN" -eq 1 ]]; then
-        echo "⚙️ Would copy '$DEST_DIR' → '$dev/Music/'"
-      else
-        read -p "Copy to device at $dev? [y/N]: " ans
-        if [[ "$ans" =~ ^[Yy]$ ]]; then
-          echo "📋 rsync → $dev/Music/"
-          rsync -a --info=progress2 "$DEST_DIR" "$dev/Music/"
-        else
-          echo "⏭️ Skipping $dev"
-        fi
-      fi
-    fi
-  done
-fi
 
 if [[ "$CLEANUP_ONLY" -eq 1 && "$DRYRUN" -eq 0 && "${#unconverted_files[@]}" -gt 0 ]]; then
   echo ""
@@ -191,7 +157,6 @@ if [[ "$DRYRUN" -eq 1 && "$DELETE" -eq 0 ]]; then
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     new_args=()
     [[ "$CLEANUP_ONLY" -eq 1 ]] && new_args+=("--cleanup-only")
-    [[ "$COPY" -eq 1 ]] && new_args+=("--and-copy-to-ipod-if-successful")
     echo "▶️ Executing real run: $0 \"$SRC_DIR\" \"$DEST_DIR\" ${new_args[*]}"
     exec "$0" "$SRC_DIR" "$DEST_DIR" "${new_args[@]}"
   else
